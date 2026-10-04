@@ -1,9 +1,39 @@
+[?2004l
+set firewall ipv4 name IT-to-OT default-action 'drop'
+set firewall ipv4 name IT-to-OT default-log
+set firewall ipv4 name IT-to-OT rule 10 action 'accept'
+set firewall ipv4 name IT-to-OT rule 10 state 'established'
+set firewall ipv4 name IT-to-OT rule 10 state 'related'
+set firewall ipv4 name IT-to-OT rule 20 action 'accept'
+set firewall ipv4 name IT-to-OT rule 20 destination address '10.20.20.10'
+set firewall ipv4 name IT-to-OT rule 20 destination port '502'
+set firewall ipv4 name IT-to-OT rule 20 protocol 'tcp'
+set firewall ipv4 name IT-to-OT rule 20 source address '10.10.10.10'
+set firewall ipv4 name IT-to-OT rule 30 action 'accept'
+set firewall ipv4 name IT-to-OT rule 30 destination address '10.20.20.10'
+set firewall ipv4 name IT-to-OT rule 30 protocol 'icmp'
+set firewall ipv4 name IT-to-OT rule 30 source address '10.10.10.10'
+set firewall ipv4 name OT-to-IT default-action 'drop'
+set firewall ipv4 name OT-to-IT default-log
+set firewall ipv4 name OT-to-IT rule 10 action 'accept'
+set firewall ipv4 name OT-to-IT rule 10 state 'established'
+set firewall ipv4 name OT-to-IT rule 10 state 'related'
+set firewall zone IT from OT firewall name 'OT-to-IT'
+set firewall zone IT member interface 'eth1.10'
+set firewall zone OT from IT firewall name 'IT-to-OT'
+set firewall zone OT member interface 'eth1.20'
 set interfaces dummy dum0 address '2.2.2.2/32'
 set interfaces ethernet eth0 address '10.0.0.2/30'
 set interfaces ethernet eth0 hw-id '0c:fd:f9:59:00:00'
 set interfaces ethernet eth0 offload gro
 set interfaces ethernet eth1 hw-id '0c:fd:f9:59:00:01'
 set interfaces ethernet eth1 offload gro
+set interfaces ethernet eth1 vif 10 address '10.10.10.1/24'
+set interfaces ethernet eth1 vif 10 description 'IT-zone'
+set interfaces ethernet eth1 vif 20 address '10.20.20.1/24'
+set interfaces ethernet eth1 vif 20 description 'OT-zone'
+set interfaces ethernet eth2 address '192.168.56.12/24'
+set interfaces ethernet eth2 description 'MGMT'
 set interfaces ethernet eth2 hw-id '0c:fd:f9:59:00:02'
 set interfaces ethernet eth2 offload gro
 set interfaces ethernet eth3 hw-id '0c:fd:f9:59:00:03'
@@ -23,6 +53,7 @@ set service ntp allow-client address 'fc00::/7'
 set service ntp server time1.vyos.net
 set service ntp server time2.vyos.net
 set service ntp server time3.vyos.net
+set service ssh port '22'
 set system config-management commit-revisions '100'
 set system console device ttyS0 kernel
 set system console device ttyS0 speed '115200'
