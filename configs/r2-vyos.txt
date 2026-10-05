@@ -24,6 +24,7 @@ set firewall zone OT from IT firewall name 'IT-to-OT'
 set firewall zone OT member interface 'eth1.20'
 set interfaces dummy dum0 address '2.2.2.2/32'
 set interfaces ethernet eth0 address '10.0.0.2/30'
+set interfaces ethernet eth0 description 'to-R1-ether1'
 set interfaces ethernet eth0 hw-id '0c:fd:f9:59:00:00'
 set interfaces ethernet eth0 offload gro
 set interfaces ethernet eth1 hw-id '0c:fd:f9:59:00:01'

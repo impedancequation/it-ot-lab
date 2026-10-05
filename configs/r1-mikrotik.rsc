@@ -1,9 +1,9 @@
-# 2026-10-04 07:59:10 by RouterOS 7.23.7
+# 2026-10-05 07:34:53 by RouterOS 7.23.7
 #
 /interface bridge
 add name=lo0
 /interface ethernet
-set [ find default-name=ether1 ] disable-running-check=no
+set [ find default-name=ether1 ] comment=to-R2-eth0 disable-running-check=no
 set [ find default-name=ether2 ] disable-running-check=no
 set [ find default-name=ether3 ] disable-running-check=no
 set [ find default-name=ether4 ] disable-running-check=no
@@ -18,3 +18,5 @@ add address=192.168.56.11/24 interface=ether2 network=192.168.56.0
 /routing ospf interface-template
 add area=backbone networks=10.0.0.0/30
 add area=backbone networks=1.1.1.1/32 passive
+/system note
+set note="Authorized access only. Lab device."

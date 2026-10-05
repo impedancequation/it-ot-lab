@@ -6,6 +6,7 @@ Each run writes one folder under backups/ named with the date and time.
 """
 
 import os
+import re
 import time
 from datetime import datetime
 from getpass import getpass
@@ -19,6 +20,7 @@ DEVICES = [
         "ext": "rsc",
         "env": "LAB_R1_PASS",
         "command": "/export",
+        "expect": "/interface",
         "conn": {
             "device_type": "mikrotik_routeros",
             "host": "192.168.56.11",
@@ -30,6 +32,7 @@ DEVICES = [
         "ext": "txt",
         "env": "LAB_R2_PASS",
         "command": "show configuration commands",
+        "expect": "set interfaces",
         "conn": {
             "device_type": "vyos",
             "host": "192.168.56.12",
@@ -41,14 +44,18 @@ DEVICES = [
 # Lines containing any of these are dropped before the file is saved.
 SKIP = ("password", "# system id")
 
+# A RouterOS prompt such as "[admin@CHR] >" sometimes ends up in the output.
+PROMPT = re.compile(r"^\[.+@.+\] >$")
+
 
 def clean(text):
     kept = [
         line
         for line in text.splitlines()
         if not any(word in line.lower() for word in SKIP)
+        and not PROMPT.match(line.strip())
     ]
-    return "\n".join(kept) + "\n"
+    return "\n".join(kept).rstrip() + "\n"
 
 
 def backup(dev, outdir):
@@ -59,6 +66,12 @@ def backup(dev, outdir):
             output = ssh.send_command(dev["command"], read_timeout=60)
     except Exception as err:
         print(f"[FAIL] {dev['name']}: {err}")
+        return False
+    if dev["expect"] not in output:
+        print(
+            f"[FAIL] {dev['name']}: output does not look like a config "
+            f"({len(output)} chars), file not saved"
+        )
         return False
     path = outdir / f"{dev['name']}.{dev['ext']}"
     path.write_text(clean(output), encoding="utf-8")
