@@ -1,5 +1,7 @@
 # Phase 3 log: pushing a config change to both routers
 
+Phase 2 ended with a backup script. In Phase 3 I added scripts/push_config.py, which sends a config change to both routers over SSH, and I used the backup script to check what actually changed.
+
 Date: 2026-10-05. This is the full step-by-step record of Phase 3 so far: every step, the commands I ran, what came back, the mistakes I made and the problems I hit. The short version is in the Phase 3 section of `README.md`.
 
 All router console steps were done in Solar-PuTTY (telnet to the GNS3 VM) or over SSH from Windows PowerShell in `D:\it-ot-lab`. Passwords are not shown anywhere in this log.
@@ -673,3 +675,9 @@ These were mine, not lab problems, and none of them did damage:
 - Ran `ssh` to the VyOS router from the VyOS console itself.
 - Saved `debug_r2.py` in `scripts` instead of `D:\it-ot-lab`, so the first two runs could not find it.
 - Typed `configure` while the console was already in config mode.
+
+## 20. Problems I ran into in Phase 3
+- With a pre-login banner set on R2, the backup saved a 76-byte file that only had prompts, and still printed OK. The next run timed out on set terminal length 0. After I removed the banner, the backup worked again (3337 bytes). I only tried it with and without the banner once each, so I do not know for sure that the banner was the cause. The check above was added because of this. R1 still has its login note and Netmiko works with it.
+- The first push to R2 failed with "Pattern not detected" while entering config mode, and R2 was left unchanged. Manual SSH worked fine. A test that only entered and left config mode worked with a 60 second timeout, and the push worked once I added that timeout. I think the slow R2 is the cause, but I did not confirm it.
+- In one run the R1 backup ended with a RouterOS prompt and blank lines. It did not happen in other runs and I do not know why. The script now removes those lines.
+- VyOS hit a kernel panic during boot and then "address already in use" on its console port. I shut down the GNS3 VM, started it again and started VyOS before MikroTik. I did not find the cause of the panic.

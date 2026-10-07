@@ -1,4 +1,4 @@
-# 2026-10-05 07:34:53 by RouterOS 7.23.7
+# 2026-10-07 00:27:24 by RouterOS 7.23.7
 #
 /interface bridge
 add name=lo0
@@ -18,5 +18,7 @@ add address=192.168.56.11/24 interface=ether2 network=192.168.56.0
 /routing ospf interface-template
 add area=backbone networks=10.0.0.0/30
 add area=backbone networks=1.1.1.1/32 passive
+/snmp
+set enabled=yes
 /system note
 set note="Authorized access only. Lab device."

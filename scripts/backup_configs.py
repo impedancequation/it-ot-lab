@@ -72,6 +72,8 @@ def backup(dev, outdir):
             f"[FAIL] {dev['name']}: output does not look like a config "
             f"({len(output)} chars), file not saved"
         )
+        # Show what the device sent back, to see why the check failed.
+        print(f"       raw output (first 400 chars): {output[:400]!r}")
         return False
     path = outdir / f"{dev['name']}.{dev['ext']}"
     path.write_text(clean(output), encoding="utf-8")

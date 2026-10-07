@@ -1,38 +1,59 @@
 # IT/OT Segmentation Lab
 
-A GNS3 lab I'm building in stages to practice multi-vendor routing, IT/OT segmentation and network automation. Done so far: OSPF between two routers from different vendors, an IT zone and an OT zone separated by a firewall, and a Python script that backs up both routers. Monitoring is still to do.
+A GNS3 lab I built in four stages to practice multi-vendor routing, IT/OT segmentation and network automation. Two routers from different vendors run OSPF. An IT zone and an OT zone sit behind a zone-based firewall. Two Python scripts back up and change the config of both routers. A small monitoring stack shows interface status and traffic.
 
-## Current state
+![Topology](docs/topology.svg)
 
-- R1: MikroTik CHR 7.23.7 (RouterOS)
-- R2: VyOS 2026.09.30-1921-rolling
-- One link between them, 10.0.0.0/30, both routers in OSPF area 0
-- Each router advertises a loopback
+| Phase | What | Status |
+|---|---|---|
+| 1 | MikroTik CHR and VyOS, OSPF area 0 | Done |
+| 2 | IT zone and OT zone behind a firewall, config backup script | Done, except the TCP 502 rule (see below) |
+| 3 | Push one config change to both routers from Python | Done |
+| 4 | Monitoring with SNMP, Prometheus and Grafana | Done |
 
-| Device | Interface    | Address     |
-| ------ | ------------ | ----------- |
-| R1     | ether1       | 10.0.0.1/30 |
-| R1     | lo0 (bridge) | 1.1.1.1/32  |
-| R2     | eth0         | 10.0.0.2/30 |
-| R2     | dum0         | 2.2.2.2/32  |
+Not done: log anomaly detection, a working TCP 502 test, a third vendor, more than two devices. Details at the end.
 
-## Verification
+## Repo layout
 
-Screenshots will be added to `screenshots/`. They show:
+```
+configs/      latest config of R1 and R2, produced by the backup script
+docs/         this diagram and the detailed Phase 3 log
+monitoring/   prometheus.yml and the Grafana dashboard (JSON)
+screenshots/  evidence for each phase
+scripts/      backup_configs.py and push_config.py
+backups/      script output, ignored by git
+```
 
-- OSPF neighbor state Full on both routers
-- An OSPF route to the other router's loopback on both routers
-- Ping between the loopbacks in both directions, 0% packet loss
+## Addressing
 
-## Config files
+| Device | Interface | Address | Purpose |
+|---|---|---|---|
+| R1 (MikroTik) | ether1 | 10.0.0.1/30 | link to R2 |
+| R1 (MikroTik) | lo0 (bridge) | 1.1.1.1/32 | loopback in OSPF |
+| R1 (MikroTik) | ether2 | 192.168.56.11/24 | management |
+| R2 (VyOS) | eth0 | 10.0.0.2/30 | link to R1 |
+| R2 (VyOS) | dum0 | 2.2.2.2/32 | loopback in OSPF |
+| R2 (VyOS) | eth1.10 | 10.10.10.1/24 | IT zone gateway (VLAN 10) |
+| R2 (VyOS) | eth1.20 | 10.20.20.1/24 | OT zone gateway (VLAN 20) |
+| R2 (VyOS) | eth2 | 192.168.56.12/24 | management |
+| ENG-WS (VPCS) | | 10.10.10.10/24 | IT host |
+| PLC1 (VPCS) | | 10.20.20.10/24 | OT host |
 
-`configs/r1-mikrotik.rsc` is the output of `/export` on R1. `configs/r2-vyos.txt` is the output of `show configuration commands` on R2. Both were produced by the backup script from Phase 2. On R2 the interface, OSPF, VLAN, firewall and SSH lines are mine. The NTP, syslog and console lines are VyOS defaults. Password lines are removed from both files.
+R1 is MikroTik CHR 7.23.7 (RouterOS). R2 is VyOS 2026.09.30-1921-rolling.
 
 ## Environment
 
 GNS3 2.2.61 on Windows, with the GNS3 VM in VirtualBox (2 vCPU, 4 GB RAM). KVM is not available in the VM. `systeminfo` reported a hypervisor running on Windows, which probably blocks it. The nodes run in plain QEMU and take a few minutes to boot.
 
-## Problems I ran into
+## Phase 1: OSPF between two vendors
+
+R1 and R2 are connected by one link, 10.0.0.0/30, both in OSPF area 0. Each router advertises a loopback. Evidence in `screenshots/`:
+
+- OSPF neighbor state Full on both routers
+- An OSPF route to the other router's loopback on both routers
+- Ping between the loopbacks in both directions, 0% packet loss
+
+Problems:
 
 - Starting a node failed with "/dev/kvm doesn't exist". I set `enable_kvm = false` under `[Qemu]` in `gns3_server.conf` on the GNS3 VM.
 - The GNS3 CHR appliance wizard did not list 7.23.7. I added it as a custom version based on 7.22.1.
@@ -40,31 +61,18 @@ GNS3 2.2.61 on Windows, with the GNS3 VM in VirtualBox (2 vCPU, 4 GB RAM). KVM i
 - Pasting config into the telnet console cut off a few lines. I re-entered them and checked the result with `print` and `show` commands.
 - The default CHR config had a DHCP client on ether1. I removed it because the link uses a static address.
 
-## Phase 2: IT/OT segmentation and config backup script
+## Phase 2: IT/OT segmentation and config backup
 
-Phase 1 left me with two routers running OSPF: MikroTik CHR (R1) and VyOS (R2). In Phase 2 I split the network into an IT zone and an OT zone with a firewall between them, and wrote a Python script that backs up both routers.
-
-Everything runs in GNS3 on a laptop, with KVM disabled, so boot times and SSH logins are slow.
-
-### What I added to the topology
+### Topology additions
 
 - **SW1**: GNS3 Ethernet switch. Port 0 is a trunk to R2 eth1, port 1 is access VLAN 10, port 2 is access VLAN 20.
 - **ENG-WS** (VPCS): stands in for an engineering workstation in the IT zone.
 - **PLC1** (VPCS): stands in for a PLC in the OT zone. It is only a simulated host. No PLC or Modbus software runs on it.
-- **SW-MGMT and Cloud1**: a small management network so my Windows PC can reach both routers over SSH.
-
-| Device | Interface | Address | Purpose |
-|---|---|---|---|
-| R2 (VyOS) | eth1.10 | 10.10.10.1/24 | IT zone gateway (VLAN 10) |
-| R2 (VyOS) | eth1.20 | 10.20.20.1/24 | OT zone gateway (VLAN 20) |
-| ENG-WS | | 10.10.10.10/24 | IT host |
-| PLC1 | | 10.20.20.10/24 | OT host |
-| R1 (MikroTik) | ether2 | 192.168.56.11/24 | management |
-| R2 (VyOS) | eth2 | 192.168.56.12/24 | management |
+- **SW-MGMT and Cloud1**: a small management network so my Windows PC can reach both routers.
 
 ### Segmentation
 
-R2 is both the router and the firewall for the two zones. I used the VyOS zone-based firewall: zone IT is eth1.10 and zone OT is eth1.20.
+R2 is both the router and the firewall. I used the VyOS zone-based firewall: zone IT is eth1.10 and zone OT is eth1.20.
 
 IT to OT:
 1. Accept established and related traffic.
@@ -79,14 +87,25 @@ OT to IT:
 What I tested:
 
 - Before the firewall, ENG-WS could ping PLC1 through R2.
-- After the firewall, ENG-WS can still ping PLC1. PLC1 pinging ENG-WS times out, and `show log firewall` shows those packets dropped by the OT-to-IT rule set.
-- I did not test the TCP 502 rule. I never ran a Modbus client, so that rule is configured and visible in the config, but untested.
+- After the firewall, ENG-WS can still ping PLC1 (305 of 305 replies in one run). PLC1 pinging ENG-WS times out, and `show log firewall` shows those packets dropped by the OT-to-IT rule set.
+- A TCP SYN from ENG-WS to PLC1 port 80 gets no answer, and the log shows it dropped by the IT-to-OT default rule.
+
+### The TCP 502 rule is not confirmed
+
+I tested it with `ping 10.20.20.10 -3 -p 502` from ENG-WS (VPCS sends a TCP SYN). It got no reply. What I found:
+
+- The SYN passes the firewall, and PLC1 answers with a SYN-ACK.
+- The OT-to-IT default rule drops that SYN-ACK, so ENG-WS never sees it. The connection tracking entry on R2 stays in `SYN_SENT`.
+- `tcpdump` on eth1.20 shows a SYN-ACK from port 502 back to the right source port, with ack equal to the SYN sequence number plus 1.
+- Setting `nf_conntrack_tcp_be_liberal=1` for one test did not help. I set it back to 0.
+
+I do not know the cause. VPCS has a very simple TCP stack, so it may be that, but I did not prove it. I did not add a rule to accept the SYN-ACK, because that would open OT to IT just to make a test pass. To close this I would replace PLC1 and ENG-WS with hosts that have a real TCP stack and run a Modbus client and server.
 
 ### Config backup script
 
 `scripts/backup_configs.py` uses Netmiko to connect to R1 (`mikrotik_routeros`) and R2 (`vyos`) over SSH. It runs `/export` on R1 and `show configuration commands` on R2, and saves each result in `backups/<date>_<time>/`.
 
-Passwords are not stored in the script. It asks for them when it starts, or reads them from the environment variables `LAB_R1_PASS` and `LAB_R2_PASS`. Lines that contain `password` or `system id` are removed before the file is written.
+Passwords are not stored in the script. It asks for them when it starts, or reads them from the environment variables `LAB_R1_PASS` and `LAB_R2_PASS`. Lines that contain `password` or `system id` are removed before the file is written. In Phase 3 I added a check that the output looks like a config (R1 must contain `/interface`, R2 must contain `set interfaces`), and removed RouterOS prompt lines from the end of the R1 file.
 
 ### Timing
 
@@ -98,694 +117,139 @@ I measured the manual way with a stopwatch: from opening the console session and
 | Script, run 1 (login to files saved) | | | 34.2 s |
 | Script, run 2 (login to files saved) | | | 26.3 s |
 
-For two devices the script is only a little faster. The difference is that nobody has to sit at the console, and nothing is copied by hand. I expect the gap to grow with more devices because the manual steps repeat for each one, but I only measured two.
+For two devices the script is only a little faster. The difference is that nobody has to sit at the console and nothing is copied by hand. I expect the gap to grow with more devices, but I only measured two.
 
-### Problems I ran into in Phase 2
+### Problems
 
 - My Windows PC could not reach the routers until I set Promiscuous Mode to Allow All on Adapter 1 of the GNS3 VM in VirtualBox.
 - Windows OpenSSH to MikroTik failed with "message authentication code incorrect" until I forced the `aes128-ctr` cipher. Netmiko connected without any change.
 - The first backup showed duplicate OSPF entries and a leftover DHCP client on R1. I found it by reading the backup file, removed the extra entries, and ran the backup again. I do not know how the duplicates got there.
 
-# Phase 3 log: pushing a config change to both routers
+## Phase 3: push one config change to both routers
 
-Phase 2 ended with a backup script. In Phase 3 I added scripts/push_config.py, which sends a config change to both routers over SSH, and I used the backup script to check what actually changed.
-
-Date: 2026-10-05. This is the full step-by-step record of Phase 3 so far: every step, the commands I ran, what came back, the mistakes I made and the problems I hit. The short version is in the Phase 3 section of `README.md`.
-
-All router console steps were done in Solar-PuTTY (telnet to the GNS3 VM) or over SSH from Windows PowerShell in `D:\it-ot-lab`. Passwords are not shown anywhere in this log.
-
-## Contents
-
-0. Starting point
-1. Banner syntax test on R1
-2. Banner syntax test on R2
-3. First "before" backup
-4. Second backup fails on R2
-5. Manual SSH to R2
-6. Removing the banner and testing again
-7. Adding a config check to the backup script
-8. First push script and its failure
-9. Debug script for R2
-10. Push with a longer timeout, and the before/after check
-11. Cleaning up the debug files
-12. Lab restart: kernel panic and port error
-13. Manual timing
-14. Script timing from a clean state
-15. Prompt text at the end of the R1 backup
-16. README block
-17. Results table
-18. What is still not done
-19. My own mistakes during the session
-
----
-
-## 0. Starting point
-
-Phase 1 and 2 were finished: MikroTik CHR 7.23.7 (R1) and VyOS 2026.09.30-1921-rolling (R2), OSPF area 0, IT zone VLAN 10 and OT zone VLAN 20 behind the VyOS zone-based firewall, and `scripts/backup_configs.py` (commit `a9c6dc4`).
-
-I decided to start Phase 3 with the repo cleanup (screenshots, topology diagram, README). I took one screenshot of the GNS3 canvas, then decided to do all screenshots and the diagram at the end when the whole project is finished. So I moved on to item 2 of Phase 3: pushing a config change to several devices from Python.
-
-State of the lab when I started:
-
-- GNS3 VM running, GNS3 stable, CPU low.
-- Nodes started in this order: VyOS-1 first, MikroTik CHR after the CPU dropped, then ENG-WS and PLC1. I did not use Start All.
-- Canvas: R1, R2, SW1, SW-MGMT, Cloud1, ENG-WS, PLC1 all green, all links green.
-- Servers Summary at that moment: GNS3 VM CPU 41.3%, RAM 55.7%. Laptop CPU 22.6%, RAM 88.6%.
-- Consoles: MikroTik telnet 192.168.56.101:5011, VyOS 192.168.56.101:5013, ENG-WS 5016, PLC1 5018.
-
-The change I wanted to push had to be small and unable to touch routing or the firewall. First idea: a login banner on both routers.
-
-## 1. Banner syntax test on R1
-
-I tested the syntax by hand first, one router at a time, before putting anything in a script.
-
-On the MikroTik console:
-
-```
-[admin@CHR] > /system note set note="Authorized access only. Lab device." show-at-login=yes
-[admin@CHR] > /system note print
-      show-at-login: yes
-  show-at-cli-login: no
-               note: Authorized access only. Lab device.
-```
-
-Result: accepted, `show-at-login: yes`.
-
-## 2. Banner syntax test on R2
-
-On the VyOS console I typed `configure` and got:
-
-```
-vyos@vyos# configure
-vbash:
-  Invalid command: [configure]
-```
-
-Reason: the console was still in configuration mode from an earlier session (the prompt was `vyos@vyos#`), so `configure` was rejected. Harmless.
-
-I then set the banner and looked at the pending change:
-
-```
-vyos@vyos# compare | no-more
-[system login]
-+ banner {
-+     pre-login "Authorized access only. Lab devicee."
-+ }
-```
-
-The text has a double "e" (`devicee`). The paste into the telnet console added it. I committed anyway to confirm the syntax:
-
-```
-vyos@vyos# commit
-vyos@vyos# save
-vyos@vyos# exit
-vyos@vyos:~$ show configuration commands | match banner
-set system login banner pre-login 'Authorized access only. Lab devicee.'
-```
-
-Then I fixed the typo. I typed `configure`, set the correct text, and compared:
-
-```
-vyos@vyos# compare | no-more
-[system login banner]
-- pre-login "Authorized access only. Lab devicee."
-+ pre-login "Authorized access only. Lab device."
-```
-
-After `commit`, `save` and `exit`:
-
-```
-vyos@vyos:~$ show configuration commands | match banner
-set system login banner pre-login 'Authorized access only. Lab device.'
-```
-
-(The terminal echo was messy in that paste, but the config line itself was correct.)
-
-Syntax confirmed on both vendors:
-
-| Device | Command |
-|---|---|
-| R1 (RouterOS) | `/system note set note="..." show-at-login=yes` |
-| R2 (VyOS) | `set system login banner pre-login "..."` |
-
-## 3. First "before" backup
-
-Plan: take a backup before the push so I have a before/after comparison.
-
-```
-PS D:\it-ot-lab> python scripts\backup_configs.py
-[ OK ] r1-mikrotik -> D:\it-ot-lab\backups\2026-10-05_072244\r1-mikrotik.rsc
-[ OK ] r2-vyos -> D:\it-ot-lab\backups\2026-10-05_072244\r2-vyos.txt
-2/2 devices backed up in 34.0 s
-```
-
-I typed the placeholder `<folder>` literally in the next command and PowerShell said the path does not exist. That was my mistake, not a lab problem. With the real folder name:
-
-```
-PS D:\it-ot-lab> Select-String -Path backups\2026-10-05_072244\* -Pattern "note|banner"
-
-backups\2026-10-05_072244\r1-mikrotik.rsc:21:/system note
-backups\2026-10-05_072244\r1-mikrotik.rsc:22:set note="Authorized access only. Lab device."
-```
-
-The R1 banner is in the file. There was nothing from R2, even though the banner was clearly on R2. I checked the R2 file directly:
-
-```
-PS D:\it-ot-lab> Select-String -Path backups\2026-10-05_072244\r2-vyos.txt -Pattern "banner"
-(no output)
-PS D:\it-ot-lab> (Get-Content backups\2026-10-05_072244\r2-vyos.txt).Count
-5
-PS D:\it-ot-lab> Get-Content backups\2026-10-05_072244\r2-vyos.txt
-vyos@vyos:~$
-
-vyos@vyos:~$
-
-PS D:\it-ot-lab> Get-ChildItem backups\*\r2-vyos.txt | Select-Object FullName, Length
-
-FullName                                           Length
---------                                           ------
-D:\it-ot-lab\backups\2026-10-04_145908\r2-vyos.txt   3312
-D:\it-ot-lab\backups\2026-10-05_072244\r2-vyos.txt     76
-```
-
-Finding: the R2 "backup" was 76 bytes and only held two prompts, but the script had printed `[ OK ]`. The script reported success on an empty result. This was a real weakness in my script.
-
-(I opened Explorer screenshots of the backups folder at this point, but they only showed that the folder existed and did not answer the question.)
-
-## 4. Second backup fails on R2
-
-I ran the backup again to see whether it was a one-time glitch:
-
-```
-PS D:\it-ot-lab> python scripts\backup_configs.py
-[ OK ] r1-mikrotik -> D:\it-ot-lab\backups\2026-10-05_072706\r1-mikrotik.rsc
-[FAIL] r2-vyos:
-Pattern not detected: '\x1b\\[\\?2004hvyos@vyos:\\~\\$\\ set\\ terminal\\ length\\ 0' in output.
-...
-1/2 devices backed up in 83.7 s
-```
-
-This time the failure was visible. Netmiko connected to R2 but did not get the expected answer to `set terminal length 0`. The R2 file sizes did not change (3312 and 76). The previous run probably hit the same problem, but it got saved as OK with empty content.
-
-The only thing I had changed on R2 since the last good backup (2026-10-04, 3312 bytes) was the pre-login banner. That was a suspect, not proof.
-
-## 5. Manual SSH to R2
-
-I checked that R2 itself was fine:
-
-```
-PS D:\it-ot-lab> ssh vyos@192.168.56.12
-Authorized access only. Lab device.
-vyos@192.168.56.12's password:
-Welcome to VyOS!
-...
-vyos@vyos:~$ show configuration commands | head -5
-set firewall ipv4 name IT-to-OT default-action 'drop'
-set firewall ipv4 name IT-to-OT default-log
-set firewall ipv4 name IT-to-OT rule 10 action 'accept'
-set firewall ipv4 name IT-to-OT rule 10 state 'established'
-set firewall ipv4 name IT-to-OT rule 10 state 'related'
-vyos@vyos:~$ exit
-```
-
-The banner text shows before the password prompt, login works, and the full config comes back. So R2 is not broken and not extremely slow. The problem is in how Netmiko talks to it.
-
-## 6. Removing the banner and testing again
-
-Test of the banner idea: remove it and run the backup again.
-
-```
-vyos@vyos:~$ configure
-vyos@vyos# delete system login banner pre-login
-vyos@vyos# compare | no-more
-[system login banner]
-- pre-login "Authorized access only. Lab device."
-vyos@vyos# commit
-vyos@vyos# save
-vyos@vyos# exit
-```
-
-```
-PS D:\it-ot-lab> python scripts\backup_configs.py
-[ OK ] r1-mikrotik -> D:\it-ot-lab\backups\2026-10-05_073318\r1-mikrotik.rsc
-[ OK ] r2-vyos -> D:\it-ot-lab\backups\2026-10-05_073318\r2-vyos.txt
-2/2 devices backed up in 23.5 s
-
-PS D:\it-ot-lab> Get-ChildItem backups\*\r2-vyos.txt | Select-Object FullName, Length
-D:\it-ot-lab\backups\2026-10-04_145908\r2-vyos.txt   3312
-D:\it-ot-lab\backups\2026-10-05_072244\r2-vyos.txt     76
-D:\it-ot-lab\backups\2026-10-05_073318\r2-vyos.txt   3337
-```
-
-The R2 backup went back to normal size. I compared it with yesterday's file:
-
-```
-PS D:\it-ot-lab> Compare-Object (Get-Content backups\2026-10-04_145908\r2-vyos.txt) (Get-Content backups\2026-10-05_073318\r2-vyos.txt)
-
-InputObject             SideIndicator
------------             -------------
-set system login banner =>
-```
-
-The 25-byte difference was one leftover line, `set system login banner`. `delete ... pre-login` removed the text but left an empty `banner` node. I removed it:
-
-```
-vyos@vyos# delete system login banner
-vyos@vyos# compare | no-more
-[system login]
-- banner {
-- }
-vyos@vyos# commit
-vyos@vyos# save
-vyos@vyos# exit
-vyos@vyos:~$ show configuration commands | match banner
-(no output)
-```
-
-R2 was back to the same config as the 2026-10-04 backup. The R1 login note stayed in place, and Netmiko works fine with it.
-
-What I can say: with the R2 pre-login banner, the backup failed twice; without it, the backup worked once. That is one test each way. I do not know the exact mechanism. My guess is that the banner text before the password prompt confuses how Netmiko reads the prompt.
-
-## 7. Adding a config check to the backup script
-
-To stop the script from calling an empty result a success, I added an `expect` text to each device and a check in `backup()`:
-
-- R1: `"expect": "/interface"`
-- R2: `"expect": "set interfaces"`
-
-```python
-    if dev["expect"] not in output:
-        print(
-            f"[FAIL] {dev['name']}: output does not look like a config "
-            f"({len(output)} chars), file not saved"
-        )
-        return False
-```
-
-I made edits 1 and 2 myself and uploaded the file; the full file with edit 3 was then pasted in. First run with the check:
-
-```
-PS D:\it-ot-lab> python scripts\backup_configs.py
-[ OK ] r1-mikrotik -> D:\it-ot-lab\backups\2026-10-05_074840\r1-mikrotik.rsc
-[ OK ] r2-vyos -> D:\it-ot-lab\backups\2026-10-05_074840\r2-vyos.txt
-2/2 devices backed up in 25.8 s
-```
-
-I only tested the success path. The failure path (empty output rejected) did not trigger in this run.
-
-Backup `2026-10-05_074840` is my "before" baseline: R1 with only the login note, R2 without a banner, nothing else changed.
-
-## 8. First push script and its failure
-
-Since the banner idea broke Netmiko on R2, I changed the pushed change to an interface description on the R1-R2 link:
+`scripts/push_config.py` sends the same small change to both routers with Netmiko `send_config_set`. I picked an interface description on the R1-R2 link because it cannot touch routing or the firewall.
 
 | Device | Commands |
 |---|---|
 | R1 | `/interface ethernet set ether1 comment="to-R2-eth0"` |
 | R2 | `set interfaces ethernet eth0 description 'to-R1-ether1'`, `commit`, `save` |
 
-I created `scripts/push_config.py` with Netmiko `send_config_set`, error words in the output (`invalid`, `failure`, `expected end of command`, `not valid`) treated as a failure, and the VyOS config mode exited with `exit_config_mode()`. I saved it, and Explorer showed it next to `backup_configs.py`.
+The script treats error words in the output (`invalid`, `failure`, `expected end of command`, `not valid`) as a failure. It has a 60 second read timeout because the first push to R2 failed with "Pattern not detected" when entering config mode. It asks for the router passwords when it starts. It has no rollback: after a failed run one router can be changed and the other not.
 
-First run:
+`[ OK ]` from the script only means the routers printed no error, so I checked the result by taking a backup before and after and comparing the two. R1 changed by the `ether1` comment only, R2 by the one description line, and nothing else. OSPF, VLANs and the firewall were not touched.
 
-```
-PS D:\it-ot-lab> python scripts\push_config.py
-[ OK ] r1-mikrotik: 1 commands sent
-[FAIL] r2-vyos:
-
-Pattern not detected: '(?:\x1b\\[\\?2004hvyos@vyos.*$|#.*$)' in output.
-...
-1/2 devices updated in 42.5 s
-```
-
-R1 changed. R2 failed while entering config mode. I did not know whether any command had reached R2, so I checked R2 directly.
-
-My mistake here: I was already on the VyOS console and typed `ssh vyos@192.168.56.12`, so VyOS connected to itself. The host key question appeared and my next command was pasted into the yes/no prompt, so I typed `yes` and then exited. No harm done.
-
-Then in the console:
-
-```
-vyos@vyos:~$ show configuration commands | match description
-set interfaces ethernet eth1 vif 10 description 'IT-zone'
-set interfaces ethernet eth1 vif 20 description 'OT-zone'
-set interfaces ethernet eth2 description 'MGMT'
-```
-
-No description on eth0, so R2 was unchanged. The script failed before sending the first `set`. Netmiko's `Last login ... from 192.168.56.1` line in the SSH banner showed that the script had connected.
-
-Side note: the push has no rollback. After this run R1 had the change and R2 did not.
-
-## 9. Debug script for R2
-
-To see what R2 sends back, I wrote a read-only script that only enters config mode and leaves it (no `set`, no `commit`), with a 60 second timeout and a session log:
-
-```python
-ssh = ConnectHandler(
-    device_type="vyos", host="192.168.56.12", username="vyos",
-    password=pw, session_log="r2_session.log", read_timeout_override=60,
-)
-print("connected, prompt:", repr(ssh.find_prompt()))
-try:
-    ssh.config_mode()
-    print("config mode OK:", ssh.check_config_mode())
-    ssh.exit_config_mode()
-except Exception as err:
-    print("FAIL:", err)
-ssh.disconnect()
-```
-
-I saved it as `debug_r2.py`, but it ended up in the `scripts` folder instead of `D:\it-ot-lab`, so `python debug_r2.py` said "No such file or directory" twice. Running it with the right path worked:
-
-```
-PS D:\it-ot-lab> python scripts\debug_r2.py
-connected, prompt: '\x1b[?2004h'
-config mode OK: True
-```
-
-The session log showed `configure` entering the `[edit]` prompt and `exit` leaving it, with a lot of empty prompts in between. Netmiko had masked the hostname and some words in the log.
-
-Findings:
-
-- Config mode works with a 60 second timeout.
-- The only difference from the failed push was the timeout. The push script used the default, which is much shorter. R2 runs without KVM and answers slowly. This is my best explanation, not something I proved in isolation.
-- `find_prompt` returns `'\x1b[?2004h'` instead of `vyos@vyos`. It is a terminal control code from VyOS rolling. It did not stop config mode from working.
-
-## 10. Push with a longer timeout, and the before/after check
-
-I added one line to `push()`:
-
-```python
-    conn["read_timeout_override"] = 60
-```
-
-```
-PS D:\it-ot-lab> python scripts\push_config.py
-[ OK ] r1-mikrotik: 1 commands sent
-[ OK ] r2-vyos: 3 commands sent
-2/2 devices updated in 76.3 s
-```
-
-`[ OK ]` only means the routers printed no error. To check the real result I took an "after" backup and compared it with the `074840` baseline:
-
-```
-PS D:\it-ot-lab> python scripts\backup_configs.py
-[ OK ] r1-mikrotik -> D:\it-ot-lab\backups\2026-10-05_080821\r1-mikrotik.rsc
-[ OK ] r2-vyos -> D:\it-ot-lab\backups\2026-10-05_080821\r2-vyos.txt
-2/2 devices backed up in 26.5 s
-
-PS D:\it-ot-lab> $after = (Get-ChildItem backups | Sort-Object Name | Select-Object -Last 1).Name; $after
-2026-10-05_080821
-```
-
-R1:
-
-```
-# 2026-10-05 01:08:28 by RouterOS 7.23.7                                     =>
-set [ find default-name=ether1 ] comment=to-R2-eth0 disable-running-check=no =>
-# 2026-10-05 00:48:45 by RouterOS 7.23.7                                     <=
-set [ find default-name=ether1 ] disable-running-check=no                    <=
-```
-
-R2:
-
-```
-set interfaces ethernet eth0 description 'to-R1-ether1'                      =>
-```
-
-(`<=` is only in the before file, `=>` only in the after file. The two `#` lines on R1 are the export timestamps, not config changes.)
-
-Result: R1 changed by the `ether1` comment only, R2 by the one description line, and nothing else. OSPF, VLANs and the firewall were not touched. The 76.3 s is not used for the final timing because R1 already had the comment from the failed first run.
-
-## 11. Cleaning up the debug files
-
-```
-PS D:\it-ot-lab> Remove-Item scripts\debug_r2.py, r2_session.log
-PS D:\it-ot-lab> Get-ChildItem scripts; Get-ChildItem *.log
-
--a----  10/5/2026   7:47 AM   2730 backup_configs.py
--a----  10/5/2026   8:05 AM   2458 push_config.py
-```
-
-Only the two real scripts are left, and there is no `.log` file in `D:\it-ot-lab`.
-
-## 12. Lab restart: kernel panic and port error
-
-I had shut the lab down for a while and started it again. MikroTik started fine and booted normally in its console. VyOS hit a kernel panic during boot in its console. I closed the console and stopped the node, and when I started it again GNS3 showed:
-
-```
-error while starting VyOS-1: Could not start Telnet QEMU console [Errno 98] error while attempting to bind on address ('0.0.0.0', 5013): [errno 98] address already in use
-```
-
-Solar-PuTTY showed "Disconnect (host hard-reset)!" on the VyOS tab, and the console would not open.
-
-I did not find the cause of the panic. My guess is that the CPU of the GNS3 VM was full while two nodes booted (no KVM), but I did not confirm it. The panic happens before the config is read, so the config should be safe. The Errno 98 is the old VyOS process still holding console port 5013.
-
-What I did:
-
-1. Stopped all nodes in GNS3 and saved with Ctrl+S.
-2. Closed the VyOS and MikroTik tabs in Solar-PuTTY.
-3. Closed GNS3.
-4. In VirtualBox: GNS3 VM, Close, ACPI Shutdown.
-5. Started the GNS3 VM, waited for `IP: 192.168.56.101 PORT: 80`.
-6. Opened GNS3, started VyOS alone first, then MikroTik, then the VPCS nodes.
-
-After that both routers came up. I did not try the `noapic` boot option.
-
-Persistence check after the restart:
-
-```
-[admin@CHR] > /interface ethernet print where name=ether1
-Flags: R - RUNNING
-Columns: NAME, MTU, MAC-ADDRESS, ARP
-#   NAME     MTU  MAC-ADDRESS        ARP
-;;; to-R2-eth0
-0 R ether1  1500  0C:54:EB:19:00:00  enabled
-
-vyos@vyos:~$ show configuration commands | match description
-set interfaces ethernet eth0 description 'to-R1-ether1'
-set interfaces ethernet eth1 vif 10 description 'IT-zone'
-set interfaces ethernet eth1 vif 20 description 'OT-zone'
-set interfaces ethernet eth2 description 'MGMT'
-```
-
-Both changes survived the restart, and the kernel panic did not damage the R2 config.
-
-I also asked whether closing a Solar-PuTTY tab could cause boot problems. It cannot: closing a tab only drops the telnet session from Windows. The routers keep running in GNS3. The earlier boot problems came from starting and stopping nodes in GNS3, not from closing tabs.
-
-## 13. Manual timing
-
-To compare fairly, I removed the change from both routers first. This part was not timed.
-
-R1:
-
-```
-[admin@CHR] > /interface ethernet set ether1 comment=""
-[admin@CHR] > /interface ethernet print where name=ether1
-Flags: R - RUNNING
-Columns: NAME, MTU, MAC-ADDRESS, ARP
-#   NAME     MTU  MAC-ADDRESS        ARP
-0 R ether1  1500  0C:54:EB:19:00:00  enabled
-```
-
-R2:
-
-```
-vyos@vyos:~$ configure
-vyos@vyos# delete interfaces ethernet eth0 description
-vyos@vyos# compare | no-more
-[interfaces ethernet eth0]
-- description "to-R1-ether1"
-vyos@vyos# commit
-vyos@vyos# save
-vyos@vyos# exit
-vyos@vyos:~$ show configuration commands | match description
-set interfaces ethernet eth1 vif 10 description 'IT-zone'
-set interfaces ethernet eth1 vif 20 description 'OT-zone'
-set interfaces ethernet eth2 description 'MGMT'
-```
-
-Method for the manual measurement, the same as for the manual backup timing in Phase 2: stopwatch (Windows Clock app) starts when I open the console session, I log in, type the commands by hand (no paste), and stops when the prompt comes back. Checking the result is not timed. I logged out with `/quit` (MikroTik) and `exit` (VyOS) and closed the tabs before each run, so the login was part of the time.
-
-- R1: `/interface ethernet set ether1 comment="to-R2-eth0"`. Stopwatch: **17.26 s**.
-- R2: `configure`, `set interfaces ethernet eth0 description 'to-R1-ether1'`, `commit`, `save`, `exit`. The stopwatch was reset to 0 before this run. Stopwatch: **1:19.03**, so **79.03 s**.
-
-Check after stopping the stopwatch:
-
-```
-[admin@CHR] > /interface ethernet print where name=ether1
-;;; to-R2-eth0
-0 R ether1  1500  0C:54:EB:19:00:00  enabled
-
-vyos@vyos:~$ show configuration commands | match description
-set interfaces ethernet eth0 description 'to-R1-ether1'
-set interfaces ethernet eth1 vif 10 description 'IT-zone'
-set interfaces ethernet eth1 vif 20 description 'OT-zone'
-set interfaces ethernet eth2 description 'MGMT'
-```
-
-Both changes were in place, so the manual numbers are valid. Manual total: 17.26 + 79.03 = about 96.3 s.
-
-## 14. Script timing from a clean state
-
-I removed the change from both routers again with the same commands as before (not timed) and checked both:
-
-```
-[admin@CHR] > /interface ethernet set ether1 comment=""
-[admin@CHR] > /interface ethernet print where name=ether1
-0 R ether1  1500  0C:54:EB:19:00:00  enabled      (no comment line)
-
-vyos@vyos:~$ show configuration commands | match description
-set interfaces ethernet eth1 vif 10 description 'IT-zone'
-set interfaces ethernet eth1 vif 20 description 'OT-zone'
-set interfaces ethernet eth2 description 'MGMT'
-```
-
-Script run:
-
-```
-PS D:\it-ot-lab> python scripts\push_config.py
-[ OK ] r1-mikrotik: 1 commands sent
-[ OK ] r2-vyos: 3 commands sent
-2/2 devices updated in 60.6 s
-```
-
-The time the script prints starts after the passwords are typed and ends when both devices are done. Then the before/after check against the `074840` baseline:
-
-```
-PS D:\it-ot-lab> python scripts\backup_configs.py
-[ OK ] r1-mikrotik -> D:\it-ot-lab\backups\2026-10-05_142821\r1-mikrotik.rsc
-[ OK ] r2-vyos -> D:\it-ot-lab\backups\2026-10-05_142821\r2-vyos.txt
-2/2 devices backed up in 26.4 s
-```
-
-R1 diff:
-
-```
-# 2026-10-05 07:28:23 by RouterOS 7.23.7                                     =>
-set [ find default-name=ether1 ] comment=to-R2-eth0 disable-running-check=no =>
-                                                                             =>
-                                                                             =>
-                                                                             =>
-[admin@CHR] >                                                                =>
-# 2026-10-05 00:48:45 by RouterOS 7.23.7                                     <=
-set [ find default-name=ether1 ] disable-running-check=no                    <=
-```
-
-R2 diff:
-
-```
-set interfaces ethernet eth0 description 'to-R1-ether1' =>
-```
-
-Result: the change is in place on both vendors and nothing else differs in the configs. The R1 file did get three empty lines and a RouterOS prompt at the end, which is the next section.
-
-## 15. Prompt text at the end of the R1 backup
-
-Ends of the two R1 files:
-
-```
-PS D:\it-ot-lab> Get-Content backups\$after\r1-mikrotik.rsc -Tail 8
-...
-/system note
-set note="Authorized access only. Lab device."
-
-
-
-[admin@CHR] >
-
-PS D:\it-ot-lab> Get-Content backups\2026-10-05_074840\r1-mikrotik.rsc -Tail 8
-...
-/system note
-set note="Authorized access only. Lab device."
-```
-
-The `142821` file had three empty lines and the prompt `[admin@CHR] >` at the end. The `074840` file was clean, and so was the `080821` run, so it does not happen every time. I do not know why. A `.rsc` file with a prompt line in it would give an error if I imported it again, so I changed `clean()` in the backup script:
-
-```python
-PROMPT = re.compile(r"^\[.+@.+\] >$")
-
-
-def clean(text):
-    kept = [
-        line
-        for line in text.splitlines()
-        if not any(word in line.lower() for word in SKIP)
-        and not PROMPT.match(line.strip())
-    ]
-    return "\n".join(kept).rstrip() + "\n"
-```
-
-(It also needed `import re` at the top.) Run after the change:
-
-```
-PS D:\it-ot-lab> python scripts\backup_configs.py
-[ OK ] r1-mikrotik -> D:\it-ot-lab\backups\2026-10-05_143451\r1-mikrotik.rsc
-[ OK ] r2-vyos -> D:\it-ot-lab\backups\2026-10-05_143451\r2-vyos.txt
-2/2 devices backed up in 25.2 s
-
-PS D:\it-ot-lab> $new = (Get-ChildItem backups | Sort-Object Name | Select-Object -Last 1).Name; Get-Content backups\$new\r1-mikrotik.rsc -Tail 6
-add address=192.168.56.11/24 interface=ether2 network=192.168.56.0
-/routing ospf interface-template
-add area=backbone networks=10.0.0.0/30
-add area=backbone networks=1.1.1.1/32 passive
-/system note
-set note="Authorized access only. Lab device."
-```
-
-The end of the file is clean now. Because the prompt did not appear in every run, one clean run does not prove the filter by itself; the filter logic is what guarantees it.
-
-## 16. README block
-
-I got a draft of a Phase 3 section for `README.md` (the change, how the script works, how I checked it, the timing table, changes to the backup script, the problems, and what is not done), plus two small edits to the intro and to the old "Not done yet" list. Before saving it I need to check that every number and sentence matches this log. This file is the detailed version of that section.
-
-## 17. Results
-
-| Item | Value |
+| Method | Time |
 |---|---|
 | Manual, R1 | 17.26 s |
 | Manual, R2 | 79.03 s |
 | Manual, both | about 96.3 s |
-| Script push, both (from clean state) | 60.6 s |
-| Script push, both (first successful run, R1 already changed) | 76.3 s, not used for comparison |
-| Script push, first run | 42.5 s, R2 failed |
-| Backup script, both | 23.5 to 34.0 s over the day (34.0, 23.5, 25.8, 26.5, 26.4, 25.2 s on successful runs; 83.7 s on the failed run) |
+| Script, both, from a clean state | 60.6 s |
 
-The script was about 36 s faster than doing it by hand for two devices. It is one run per method, so it is a rough number. I only measured two devices.
+The script was about 36 s faster for two devices. It is one run per method, so it is a rough number. The full step-by-step record, including every failed attempt, is in [docs/phase3-log.md](docs/phase3-log.md).
 
-Backup folders from today (all in `backups/`, ignored by git):
+Problems:
 
-| Folder | What it is |
-|---|---|
-| `2026-10-05_072244` | R2 file empty (76 bytes), reported OK |
-| `2026-10-05_072706` | R2 failed |
-| `2026-10-05_073318` | R2 back to normal after the banner was removed (3337 bytes) |
-| `2026-10-05_074840` | "before" baseline |
-| `2026-10-05_080821` | "after" for the first successful push |
-| `2026-10-05_142821` | "after" for the clean-state push (R1 ends with prompt) |
-| `2026-10-05_143451` | after the `clean()` change, R1 ends cleanly |
-
-## 18. What is still not done
-
-- Log anomaly detection
-- Monitoring (Grafana with LibreNMS or PRTG)
-- A real Modbus test for the TCP 502 rule
-- A third vendor (no legal Cisco or Juniper image)
-- Pushing to more than two devices (I only measured two)
-- Screenshots for Phase 1 to 3 and a topology diagram, planned for the end
-- Refreshing `configs/` from the latest backup, then commit and push of the Phase 3 files (`scripts/push_config.py`, the updated `scripts/backup_configs.py`, README and this log)
-
-## 19. My own mistakes during the session
-
-These were mine, not lab problems, and none of them did damage:
-
-- Typed `<folder>` literally in a PowerShell command.
-- Pasted a long banner line into the VyOS console and got `devicee`.
-- Ran `ssh` to the VyOS router from the VyOS console itself.
-- Saved `debug_r2.py` in `scripts` instead of `D:\it-ot-lab`, so the first two runs could not find it.
-- Typed `configure` while the console was already in config mode.
-
-## 20. Problems I ran into in Phase 3
-- With a pre-login banner set on R2, the backup saved a 76-byte file that only had prompts, and still printed OK. The next run timed out on set terminal length 0. After I removed the banner, the backup worked again (3337 bytes). I only tried it with and without the banner once each, so I do not know for sure that the banner was the cause. The check above was added because of this. R1 still has its login note and Netmiko works with it.
-- The first push to R2 failed with "Pattern not detected" while entering config mode, and R2 was left unchanged. Manual SSH worked fine. A test that only entered and left config mode worked with a 60 second timeout, and the push worked once I added that timeout. I think the slow R2 is the cause, but I did not confirm it.
+- With a pre-login banner on R2, the backup saved a 76-byte file with only prompts and still printed OK. After I removed the banner it worked again. I tried each way once, so I do not know for sure that the banner was the cause. The config check in the backup script was added because of this.
 - In one run the R1 backup ended with a RouterOS prompt and blank lines. It did not happen in other runs and I do not know why. The script now removes those lines.
-- VyOS hit a kernel panic during boot and then "address already in use" on its console port. I shut down the GNS3 VM, started it again and started VyOS before MikroTik. I did not find the cause of the panic.
+- VyOS had a kernel panic during boot and then "address already in use" on its console port. I shut down the GNS3 VM, started it again and started VyOS before MikroTik. I did not find the cause of the panic.
+
+## Phase 4: monitoring
+
+Both routers answer SNMP v2c on the management network. `snmp_exporter` turns that into metrics, Prometheus scrapes it every 30 seconds, and Grafana draws the dashboard. I used the standard `if_mib` module, so the dashboard covers interface status, traffic, errors and discards. It does not show OSPF neighbor state.
+
+| Piece | Version | Port |
+|---|---|---|
+| snmp_exporter | 0.30.1 | 9116 |
+| Prometheus | 3.13.4 | 9090 |
+| Grafana | 13.2.3 | 3000 |
+
+All three run directly on Windows, outside the repo. I tried Docker first, but the Docker Desktop engine kept returning an internal server error and I did not find the cause. I did not use LibreNMS because the laptop was already at about 86% RAM with GNS3 running.
+
+The dashboard (`monitoring/grafana-dashboard.json`) has four panels: whether each router answers SNMP, up/down status per interface, traffic per interface in bits per second, and errors and discards.
+
+To check that monitoring reports a real change, I disabled `ether1` on R1. The dashboard showed R1 ether1 as down. R2 eth0 stayed up, because GNS3 does not pass the link-down to the other end. After I enabled the interface again it went back to up.
+
+SNMP v2c sends the community string in plain text. This is acceptable only because the management network is a private host-only network in a lab. The community is read-only and limited to 192.168.56.0/24. The file that holds it (`auth-lab.yml`) is not in the repo.
+
+### Setup
+
+R2 (VyOS):
+
+```
+set service snmp community <name> authorization 'ro'
+set service snmp community <name> network '192.168.56.0/24'
+set service snmp listen-address 192.168.56.12
+commit
+save
+```
+
+R1 (MikroTik):
+
+```
+/snmp community set [find default=yes] name=<name> addresses=192.168.56.0/24
+/snmp set enabled=yes
+```
+
+`auth-lab.yml`, next to the snmp_exporter binary:
+
+```
+auths:
+  lab_v2:
+    community: <name>
+    version: 2
+```
+
+Start the three tools, each in its own window:
+
+```
+snmp_exporter.exe --config.file=snmp.yml --config.file=auth-lab.yml
+prometheus.exe --config.file=monitoring\prometheus.yml --storage.tsdb.path=<folder outside the repo>
+grafana.exe server
+```
+
+In Grafana, add a Prometheus data source with URL `http://localhost:9090`, then go to Dashboards, New, Import and upload `monitoring/grafana-dashboard.json`.
+
+### Problems
+
+- The dashboard first showed the interface status as a state timeline with every cell red. The value mapping did not apply, and I do not know why. I switched that panel to a stat panel, where the same mapping works.
+- After I left the laptop idle for a few hours, snmp_exporter and Prometheus were no longer running, and R1 and R2 could not be reached from Windows. The SW-MGMT switch was missing from the GNS3 project, and I do not know exactly how it disappeared. I added it again with its three links and started the tools again with the same data folder.
+
+## Screenshots
+
+| File | Shows |
+|---|---|
+| `01-ospf-neighbors.png` | OSPF neighbor Full on R1 and R2 |
+| `02-ospf-routes.png` | OSPF route to the other loopback on both routers |
+| `03-loopback-ping.png` | ping between loopbacks, both directions |
+| `04-firewall-drop.png` | TCP port 80 from ENG-WS dropped, firewall log on R2 |
+| `05-backup-script.png` | backup script run |
+| `06-prometheus-targets.png` | both SNMP targets up |
+| `07-grafana-dashboard.png` | the dashboard |
+| `08-monitoring-link-down.png` | R1 ether1 down on the dashboard |
+
+![OSPF neighbors](screenshots/01-ospf-neighbors.png)
+![OSPF routes](screenshots/02-ospf-routes.png)
+![Loopback ping](screenshots/03-loopback-ping.png)
+![Firewall drop](screenshots/04-firewall-drop.png)
+![Backup script](screenshots/05-backup-script.png)
+![Prometheus targets](screenshots/06-prometheus-targets.png)
+![Grafana dashboard](screenshots/07-grafana-dashboard.png)
+![Link down on the dashboard](screenshots/08-monitoring-link-down.png)
+
+## Running the scripts
+
+```
+pip install netmiko
+python scripts\backup_configs.py
+python scripts\push_config.py
+```
+
+Both ask for the router passwords when they start. The backup script can also read them from `LAB_R1_PASS` and `LAB_R2_PASS`.
+
+## Not done
+
+- Log anomaly detection.
+- A working TCP 502 test with a real Modbus client and server.
+- A third vendor. I do not have a legal Cisco or Juniper image.
+- More than two devices. All timings are for two.
+- Alerting, and OSPF neighbor state in the dashboard.

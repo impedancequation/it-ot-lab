@@ -54,6 +54,7 @@ set service ntp allow-client address 'fc00::/7'
 set service ntp server time1.vyos.net
 set service ntp server time2.vyos.net
 set service ntp server time3.vyos.net
+set service snmp listen-address 192.168.56.12
 set service ssh port '22'
 set system config-management commit-revisions '100'
 set system console device ttyS0 kernel
