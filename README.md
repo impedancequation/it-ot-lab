@@ -4,6 +4,10 @@ A GNS3 lab I built in four stages to practice multi-vendor routing, IT/OT segmen
 
 ![Topology](docs/topology.svg)
 
+The same lab in GNS3:
+
+![GNS3 canvas with all nodes](screenshots/01-gns3-topology.png)
+
 | Phase | What | Status |
 |---|---|---|
 | 1 | MikroTik CHR and VyOS, OSPF area 0 | Done |
@@ -47,11 +51,25 @@ GNS3 2.2.61 on Windows, with the GNS3 VM in VirtualBox (2 vCPU, 4 GB RAM). KVM i
 
 ## Phase 1: OSPF between two vendors
 
-R1 and R2 are connected by one link, 10.0.0.0/30, both in OSPF area 0. Each router advertises a loopback. Evidence in `screenshots/`:
+R1 and R2 are connected by one link, 10.0.0.0/30, both in OSPF area 0. Each router advertises a loopback.
 
-- OSPF neighbor state Full on both routers
-- An OSPF route to the other router's loopback on both routers
-- Ping between the loopbacks in both directions, 0% packet loss
+OSPF neighbor state is Full on both routers:
+
+![OSPF neighbors on R1](screenshots/02-p1-ospf-neighbors-r1.png)
+
+![OSPF neighbors on R2](screenshots/02-p1-ospf-neighbors-r2.png)
+
+Each router has an OSPF route to the other router's loopback:
+
+![OSPF route on R1](screenshots/03-p1-ospf-routes-r1.png)
+
+![OSPF route on R2](screenshots/03-p1-ospf-routes-r2.png)
+
+Ping between the loopbacks works in both directions, 0% packet loss:
+
+![Loopback ping from R1](screenshots/04-p1-loopback-ping-r1.png)
+
+![Loopback ping from R2](screenshots/04-p1-loopback-ping-r2.png)
 
 Problems:
 
@@ -84,11 +102,33 @@ OT to IT:
 1. Accept established and related traffic (replies only).
 2. Everything else is dropped and logged.
 
+The interfaces and the firewall rule set on R2:
+
+![R2 interfaces](screenshots/05-p2-r2-interfaces.png)
+
+![R2 firewall rules](screenshots/06-p2-firewall-rules.png)
+
 What I tested:
 
 - Before the firewall, ENG-WS could ping PLC1 through R2.
 - After the firewall, ENG-WS can still ping PLC1 (305 of 305 replies in one run). PLC1 pinging ENG-WS times out, and `show log firewall` shows those packets dropped by the OT-to-IT rule set.
 - A TCP SYN from ENG-WS to PLC1 port 80 gets no answer, and the log shows it dropped by the IT-to-OT default rule.
+
+ENG-WS can ping PLC1:
+
+![IT to OT ping](screenshots/07-p2-it-to-ot-ping.png)
+
+PLC1 cannot ping ENG-WS, and R2 logs the drop:
+
+![Ping from PLC1 to ENG-WS](screenshots/08-p2-ot-to-it-blocked-plc1.png)
+
+![Firewall log on R2](screenshots/08-p2-ot-to-it-blocked-r2.png)
+
+TCP port 80 is dropped and logged:
+
+![TCP 80 test from ENG-WS](screenshots/09-p2-tcp80-dropped-eng-ws.png)
+
+![Firewall log on R2](screenshots/09-p2-tcp80-dropped-r2.png)
 
 ### The TCP 502 rule is not confirmed
 
@@ -99,6 +139,12 @@ I tested it with `ping 10.20.20.10 -3 -p 502` from ENG-WS (VPCS sends a TCP SYN)
 - `tcpdump` on eth1.20 shows a SYN-ACK from port 502 back to the right source port, with ack equal to the SYN sequence number plus 1.
 - Setting `nf_conntrack_tcp_be_liberal=1` for one test did not help. I set it back to 0.
 
+The test and the connection tracking entry on R2:
+
+![TCP 502 test from ENG-WS](screenshots/10-p2-tcp502-issue-eng-ws.png)
+
+![Connection tracking entry on R2](screenshots/10-p2-tcp502-issue-r2.png)
+
 I do not know the cause. VPCS has a very simple TCP stack, so it may be that, but I did not prove it. I did not add a rule to accept the SYN-ACK, because that would open OT to IT just to make a test pass. To close this I would replace PLC1 and ENG-WS with hosts that have a real TCP stack and run a Modbus client and server.
 
 ### Config backup script
@@ -106,6 +152,10 @@ I do not know the cause. VPCS has a very simple TCP stack, so it may be that, bu
 `scripts/backup_configs.py` uses Netmiko to connect to R1 (`mikrotik_routeros`) and R2 (`vyos`) over SSH. It runs `/export` on R1 and `show configuration commands` on R2, and saves each result in `backups/<date>_<time>/`.
 
 Passwords are not stored in the script. It asks for them when it starts, or reads them from the environment variables `LAB_R1_PASS` and `LAB_R2_PASS`. Lines that contain `password` or `system id` are removed before the file is written. In Phase 3 I added a check that the output looks like a config (R1 must contain `/interface`, R2 must contain `set interfaces`), and removed RouterOS prompt lines from the end of the R1 file.
+
+A run of the script:
+
+![Backup script](screenshots/11-p2-backup-script.png)
 
 ### Timing
 
@@ -138,6 +188,14 @@ The script treats error words in the output (`invalid`, `failure`, `expected end
 
 `[ OK ]` from the script only means the routers printed no error, so I checked the result by taking a backup before and after and comparing the two. R1 changed by the `ether1` comment only, R2 by the one description line, and nothing else. OSPF, VLANs and the firewall were not touched.
 
+A run of the push script, and the result on both routers:
+
+![Push script](screenshots/12-p3-push-script.png)
+
+![Result on R1](screenshots/13-p3-verify-result-r1.png)
+
+![Result on R2](screenshots/13-p3-verify-result-r2.png)
+
 | Method | Time |
 |---|---|
 | Manual, R1 | 17.26 s |
@@ -165,9 +223,23 @@ Both routers answer SNMP v2c on the management network. `snmp_exporter` turns th
 
 All three run directly on Windows, outside the repo. I tried Docker first, but the Docker Desktop engine kept returning an internal server error and I did not find the cause. I did not use LibreNMS because the laptop was already at about 86% RAM with GNS3 running.
 
+SNMP answers through snmp_exporter, the Prometheus targets, and the Grafana data source:
+
+![snmp_exporter test](screenshots/14-p4-snmp-exporter-test.png)
+
+![Prometheus targets](screenshots/15-p4-prometheus-targets.png)
+
+![Grafana data source](screenshots/16-p4-grafana-datasource.png)
+
 The dashboard (`monitoring/grafana-dashboard.json`) has four panels: whether each router answers SNMP, up/down status per interface, traffic per interface in bits per second, and errors and discards.
 
+![Grafana dashboard](screenshots/17-p4-grafana-dashboard.png)
+
 To check that monitoring reports a real change, I disabled `ether1` on R1. The dashboard showed R1 ether1 as down. R2 eth0 stayed up, because GNS3 does not pass the link-down to the other end. After I enabled the interface again it went back to up.
+
+![R1 ether1 down](screenshots/18-p4-link-down.png)
+
+![R1 ether1 up again](screenshots/19-p4-link-restored.png)
 
 SNMP v2c sends the community string in plain text. This is acceptable only because the management network is a private host-only network in a lab. The community is read-only and limited to 192.168.56.0/24. The file that holds it (`auth-lab.yml`) is not in the repo.
 
@@ -214,28 +286,6 @@ In Grafana, add a Prometheus data source with URL `http://localhost:9090`, then 
 - The dashboard first showed the interface status as a state timeline with every cell red. The value mapping did not apply, and I do not know why. I switched that panel to a stat panel, where the same mapping works.
 - After I left the laptop idle for a few hours, snmp_exporter and Prometheus were no longer running, and R1 and R2 could not be reached from Windows. The SW-MGMT switch was missing from the GNS3 project, and I do not know exactly how it disappeared. I added it again with its three links and started the tools again with the same data folder.
 
-## Screenshots
-
-| File | Shows |
-|---|---|
-| `01-ospf-neighbors.png` | OSPF neighbor Full on R1 and R2 |
-| `02-ospf-routes.png` | OSPF route to the other loopback on both routers |
-| `03-loopback-ping.png` | ping between loopbacks, both directions |
-| `04-firewall-drop.png` | TCP port 80 from ENG-WS dropped, firewall log on R2 |
-| `05-backup-script.png` | backup script run |
-| `06-prometheus-targets.png` | both SNMP targets up |
-| `07-grafana-dashboard.png` | the dashboard |
-| `08-monitoring-link-down.png` | R1 ether1 down on the dashboard |
-
-![OSPF neighbors](screenshots/01-ospf-neighbors.png)
-![OSPF routes](screenshots/02-ospf-routes.png)
-![Loopback ping](screenshots/03-loopback-ping.png)
-![Firewall drop](screenshots/04-firewall-drop.png)
-![Backup script](screenshots/05-backup-script.png)
-![Prometheus targets](screenshots/06-prometheus-targets.png)
-![Grafana dashboard](screenshots/07-grafana-dashboard.png)
-![Link down on the dashboard](screenshots/08-monitoring-link-down.png)
-
 ## Running the scripts
 
 ```
@@ -245,11 +295,3 @@ python scripts\push_config.py
 ```
 
 Both ask for the router passwords when they start. The backup script can also read them from `LAB_R1_PASS` and `LAB_R2_PASS`.
-
-## Not done
-
-- Log anomaly detection.
-- A working TCP 502 test with a real Modbus client and server.
-- A third vendor. I do not have a legal Cisco or Juniper image.
-- More than two devices. All timings are for two.
-- Alerting, and OSPF neighbor state in the dashboard.
